@@ -38,7 +38,7 @@ This lab implements a complete enterprise hybrid identity environment using on�
 ---
 Workflow Chart
 
-- ![Hybrid Identity Mind Map](Workflow chart.png)
+- ![Hybrid Identity Mind Map](Workflowchart.png)
 
 
 ## 🏛️ Enterprise Design Decisions
