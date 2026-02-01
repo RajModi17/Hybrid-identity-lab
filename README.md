@@ -36,7 +36,7 @@ This lab implements a complete enterprise hybrid identity environment using onâ€
 | Gateway | 192.168.40.2 |
 
 ---
-## Workflow Chart
+## ðŸ–§ Workflow Chart
 
 <img width="1049" height="4096" alt="Workflow chart" src="https://github.com/user-attachments/assets/cda431de-6fc7-49b2-82b8-982b4e9eee6a" />
 
