@@ -36,6 +36,10 @@ This lab implements a complete enterprise hybrid identity environment using on�
 | Gateway | 192.168.40.2 |
 
 ---
+Workflow Chart
+
+- ![Hybrid Identity Mind Map](Workflowchart.png)
+
 
 ## 🏛️ Enterprise Design Decisions
 
