@@ -6,7 +6,7 @@ Author: Raj Modi
 
 ## 📌 Project Overview
 
-This lab implements a complete enterprise hybrid identity environment using on‑premises Active Directory and Microsoft Entra ID. It demonstrates how real organizations integrate devices and users into a hybrid identity platform and how engineers troubleshoot common failures in production.
+This lab implements a complete enterprise hybrid identity environment using on‑premises Active Directory and Microsoft Entra ID. It demonstrates how real organizations integrate devices and users into a hybrid identity platform, as well as how engineers troubleshoot common failures in production.
 
 ---
 
@@ -29,11 +29,9 @@ This lab implements a complete enterprise hybrid identity environment using on�
 | Domain Controller | STARK-DC01 |
 | Client | CAP-WKS01 |
 | AD Forest | AVENGERS.local |
-| Entra tenant | 8tp8fd.onmicrosoft.com |
+| Entra tenant | onmicrosoft.com |
 | Hypervisor | VMware Workstation |
-| Network | VMnet8 (NAT) |
-| Subnet | 192.168.40.0/24 |
-| Gateway | 192.168.40.2 |
+| Network | (NAT) |
 
 ---
 ## 🖧 Workflow Chart
@@ -126,7 +124,7 @@ Purpose: Creates the on‑prem identity authority.
 
 ### Step 3.3 – Restart DNS service
 
-Purpose: Enables internet name resolution for all domain members.
+Purpose: Enables Internet name resolution for all domain members.
 
 ---
 
@@ -215,7 +213,7 @@ Purpose: Enables hybrid registration workflow.
 # 🧩 PHASE 8 – Verify Service Connection Point (SCP)
 
 1. Run adsiedit.msc.
-2. Connect to Configuration naming context.
+2. Connect to the Configuration naming context.
 3. Navigate:
    CN=Configuration → CN=Services → CN=Device Registration Configuration.
 
@@ -229,13 +227,13 @@ Purpose: Confirms Entra Connect stamped AD with registration endpoints.
 
 1. Run domain.msc.
 2. Right‑click Active Directory Domains and Trusts → Properties.
-3. Add 8tp8fd.onmicrosoft.com.
+3. Add onmicrosoft.com.
 
 ### Step 9.2 – Modify user UPN
 
 1. Run dsa.msc.
 2. Open steve.rogers.
-3. Change UPN to steve.rogers@8tp8fd.onmicrosoft.com.
+3. Change UPN to steve.rogers@onmicrosoft.com.
 
 Purpose: Enables identity matching for PRT issuance.
 
