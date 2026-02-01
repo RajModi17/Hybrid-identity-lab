@@ -1,6 +1,6 @@
 # 🛡️ Avengers Enterprise Hybrid Identity Lab (Enterprise‑grade, Step‑by‑Step)
 
-Author: Anthony
+Author: Raj Modi
 
 ---
 
