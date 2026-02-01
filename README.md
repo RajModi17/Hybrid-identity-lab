@@ -38,7 +38,8 @@ This lab implements a complete enterprise hybrid identity environment using onâ€
 ---
 ## Workflow Chart
 
-<img width="2098" height="8192" alt="Hybrid AD" src="https://github.com/user-attachments/assets/39e0c462-8385-4913-b9a2-4a32660486d0" />
+<img width="1049" height="4096" alt="Workflow chart" src="https://github.com/user-attachments/assets/cda431de-6fc7-49b2-82b8-982b4e9eee6a" />
+
 
 
 
