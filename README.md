@@ -1,6 +1,7 @@
 # 🛡️ Avengers Enterprise Grid — Hybrid Identity & Infrastructure Lab
 
 **Author:** Raj Modi
+
 **Platform:** VMware Workstation · Windows Server 2019 · Windows 10 · pfSense · Microsoft Entra ID · Microsoft Intune
 **Last updated:** November 9, 2026
 **Status:** ✅ Phase 1 (Infrastructure) complete · Phase 2 (Security) next
