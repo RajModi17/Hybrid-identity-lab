@@ -4,11 +4,11 @@
 
 **Platform:** VMware Workstation · Windows Server 2019 · Windows 10 · pfSense · Microsoft Entra ID · Microsoft Intune
 **Last updated:** November 9, 2026
-**Status:** ✅ Phase 1 (Infrastructure) complete · Phase 2 (Security) next
+**Status:** ✅ Phase 1 (Infrastructure) complete · 🔄 Phase 2 (Security) in progress — Component 1 done
 
 An enterprise-grade hybrid IT environment built from scratch to mirror how real organizations design, secure, and operate on-premises Active Directory integrated with Microsoft Entra ID and Microsoft Intune. Every component follows enterprise conventions (static infrastructure IPs, segmented networks, RBAC, layered Group Policy, dual domain controllers, pilot rings, tested backups), and every real problem hit along the way is documented with its root cause and fix.
 
-This README follows the **order the lab was actually built**. Troubleshooting entries are numbered in the order they happened (`#1`–`#31`), and the same numbers appear in the workflow chart.
+This README follows the **order the lab was actually built**. Troubleshooting entries are numbered in the order they happened (`#1`–`#33`), and the same numbers appear in the workflow chart.
 
 ---
 
@@ -25,10 +25,11 @@ This README follows the **order the lab was actually built**. Troubleshooting en
 9. [Part D — Recovery after extended downtime](#part-d--recovery-after-extended-downtime-october-2026)
 10. [Component 7 — Microsoft Intune](#component-7--microsoft-intune-octobernovember-2026)
 11. [Component 8 — Backup and recovery](#component-8--backup-and-recovery-november-2026)
-12. [Troubleshooting log](#-troubleshooting-log-chronological)
-13. [Known deviations](#️-known-deviations-and-limitations)
-14. [Operations runbook](#-operations-runbook)
-15. [Roadmap](#-roadmap--phase-2-security-layer)
+12. [Phase 2 · Component 1 — Conditional Access + MFA](#phase-2--component-1--conditional-access--mfa-november-2026)
+13. [Troubleshooting log](#-troubleshooting-log-chronological)
+14. [Known deviations](#️-known-deviations-and-limitations)
+15. [Operations runbook](#-operations-runbook)
+16. [Roadmap](#-roadmap--phase-2-security-layer)
 
 ---
 
@@ -48,7 +49,8 @@ This README follows the **order the lab was actually built**. Troubleshooting en
 | D | Entra Connect recovery after ~6 months offline | ✅ |
 | 7 | Component 7 — Microsoft Intune (replaces WSUS) | ✅ |
 | 8 | Component 8 — Backup and recovery (restore-tested) | ✅ |
-| — | Phase 2 — Security layer (8 components, see [Roadmap](#-roadmap--phase-2-security-layer)) | ⏳ Next |
+| P2-1 | Phase 2 · Component 1 — Conditional Access + MFA | ✅ |
+| P2-2 → P2-8 | Phase 2 · Components 2–8 (see [Roadmap](#-roadmap--phase-2-security-layer)) | ⏳ Next |
 
 ---
 
@@ -468,6 +470,58 @@ During verification CAP-WKS01's clock was wrong and couldn't sync (#28); fixed b
 
 ---
 
+# Phase 2 · Component 1 — Conditional Access + MFA (November 2026)
+
+**Why:** in Phase 1, a correct password was enough to reach Microsoft 365 from any device. Conditional Access evaluates **who** is signing in, **from which device**, **to which app**, and enforces MFA or blocks access. It turns Intune compliance (Component 7) into an access decision: **Zero Trust**.
+
+### Policies
+
+| Policy | Users | Target | Condition | Grant |
+|---|---|---|---|---|
+| `SHIELD-CA001-Admins-RequireMFA` | Admin directory roles | All resources | — | Require MFA |
+| `SHIELD-CA002-Block-LegacyAuth` | All users | All resources | Client apps: Exchange ActiveSync + Other clients | **Block** |
+| `SHIELD-CA003-AllUsers-RequireMFA` | All users | All resources | — | Require MFA |
+| `SHIELD-CA004-O365-RequireCompliantDevice` | All users | Office 365 | — | Require compliant device |
+
+**Every policy excludes** `SG-CA-Exclude-BreakGlass` and the **Directory Synchronization Accounts** role (so Entra Connect sync is never blocked).
+
+### Stage 1 — Prerequisites
+1. Cloud-only break-glass account `breakglass01` (Global Administrator, long random password stored outside the lab) in group `SG-CA-Exclude-BreakGlass`.
+2. Microsoft Authenticator registered for test users at `https://aka.ms/mysecurityinfo`.
+3. **Security Defaults disabled** (Entra ID → Overview → Properties → Manage security defaults); it cannot coexist with Conditional Access.
+4. Confirmed no Microsoft-managed Conditional Access policies existed.
+
+### Stage 2 — Report-only
+All four policies created in **Report-only** and validated in **Sign-in logs → Report-only** tab:
+
+| Test | CA003 MFA | CA004 Compliant | Device info |
+|---|---|---|---|
+| Steve, InPrivate (no device identity) | User action required | **Failure** | Device ID blank · Compliant No |
+| Steve, CAP-WKS01 Edge signed in with work profile | User action required | **Success** | Hybrid Azure AD joined · Compliant Yes |
+
+Device identity was initially missing until the Edge profile was signed in with the work account (#32).
+
+### Stage 3 — Enforcement (one policy at a time, lowest risk first)
+
+| Order | Policy turned On | Test | Result |
+|---|---|---|---|
+| 1 | CA002 | **What If**: Steve · Office 365 Exchange Online · Windows · Client app *Other clients* | ✅ CA002 **Block access** (Block overrides other grants) |
+| 2 | CA001 | Admin sign-in to `entra.microsoft.com` (InPrivate) | ✅ MFA prompt |
+| 3 | CA003 | Steve signs in to `office.com` from the host | ✅ MFA prompt |
+| 4 | CA004 | Steve from the **host** / InPrivate | ✅ **Blocked** ("Sign in with your work account" / can't get there from here) |
+| 4 | CA004 | Steve on **CAP-WKS01**, normal Edge with work profile | ✅ **Allowed** |
+
+### Final checks
+- **Sync:** `Get-ADSyncRunProfileResult` showed all runs **success** (after fixing #33).
+- **Break-glass:** sign-in shows all SHIELD policies **Not applied**.
+- **Evidence:** Steve's blocked sign-in shows **SHIELD-CA004 · Failure** in the Conditional Access tab.
+
+> **Which policy blocks unmanaged devices?** Only **CA004**. Compliance belongs to the **device**, so *any* user is blocked from Office 365 on the host or in InPrivate, and *any* licensed user is allowed on compliant CAP-WKS01. Admin portals are not part of "Office 365", so the tenant can still be managed from the host (with MFA via CA001).
+
+**Validation:** four policies **On**; MFA enforced; Office 365 reachable only from compliant devices; break-glass excluded; sync healthy.
+
+---
+
 # 🚧 Troubleshooting Log (chronological)
 
 | # | Stage | Symptom | Root cause | Fix |
@@ -503,6 +557,8 @@ During verification CAP-WKS01's clock was wrong and couldn't sync (#28); fixed b
 | 29 | Comp 8 | `Enable-ADOptionalFeature` error 8610; `replsummary` 8524 DNS lookup failure, DC02 → DC01 failing > 60 days | STARK-DC01 couldn't resolve DC02's `<DSA GUID>._msdcs` CNAME | On DC02: DNS order `10.10.10.10` first; `ipconfig /registerdns`; **restart Netlogon**; `repadmin /syncall /AdeP` |
 | 30 | Comp 8 | No `Exported-ServerConfiguration-*` folder | Installed version doesn't auto-export | `Get-ADSyncServerConfiguration -Path C:\Backups\AADConnect` |
 | 31 | Comp 8 | Forgotten pfSense web admin password | — | Console option **3** (reset) → set new password immediately |
+| 32 | P2 · CA | Report-only CA004 **Failure** on CAP-WKS01; sign-in Device ID blank, Compliant No; Edge "Sign in with your work account" page | Edge wasn't signed in with the work profile (and InPrivate never sends device identity); `AzureAdPrt` first misread from an elevated prompt (see #26) | Sign Edge profile in with the work account, enable *Allow single sign-on for work or school sites*; verify PRT in a non-elevated prompt |
+| 33 | P2 · CA | AAD connector **Delta Import** `stopped-server-down`; Event 109 *Error Code 78: internal error*; Event 6110 *watermark not saved* | Stale AAD connector watermark (not Conditional Access: authentication and exports succeeded) | `Invoke-ADSyncRunProfile` **Full Import** + **Full Synchronization** on the AAD connector, then a delta cycle |
 
 ---
 
@@ -541,6 +597,7 @@ SHIELD-FW01 → STARK-DC01 (wait ~5 min) → WAKANDA-DC02 → CAP-WKS01.
 w32tm /query /status
 repadmin /replsummary
 Get-ADSyncScheduler
+Get-ADSyncRunProfileResult -NumberRequested 6 | Select StartDate, ConnectorName, RunProfileName, Result
 wbadmin get versions
 ```
 ```cmd
@@ -563,7 +620,7 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 
 | # | Component | Goal | Main tooling | Builds on (Phase 1) | New VM? |
 |---|---|---|---|---|---|
-| 1 | Conditional Access + MFA | Zero Trust access to cloud apps | Entra ID P2 | Intune compliance, hybrid join | No |
+| 1 | Conditional Access + MFA ✅ **Done** | Zero Trust access to cloud apps | Entra ID P2 | Intune compliance, hybrid join | No |
 | 2 | Endpoint Detection & Response | Detect and respond to threats on endpoints | Microsoft Defender for Endpoint | Intune enrollment | No |
 | 3 | Identity Threat Detection | Detect attacks against Active Directory | Microsoft Defender for Identity | Both DCs, audit GPO | No |
 | 4 | Privileged Access / LAPS | Remove shared local admin passwords; tier admin accounts | Windows LAPS, tiered admin accounts | AD, Intune, GPO | No |
@@ -574,7 +631,7 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 
 ### Component details
 
-**1 · Conditional Access + MFA**
+**1 · Conditional Access + MFA** — ✅ completed (see the [Component 1 section](#phase-2--component-1--conditional-access--mfa-november-2026))
 - Register MFA (Microsoft Authenticator) for synced users; protect admin roles first.
 - Create break-glass (emergency access) accounts excluded from policies.
 - Policies: require MFA for admins · require MFA for all users · require a **compliant device** for Microsoft 365 · block legacy authentication.
@@ -638,4 +695,4 @@ Most of Phase 2 runs in the cloud, so it adds little load to the host; the scann
 
 # 🧠 Skills Demonstrated
 
-Active Directory design and operations · DNS (forward, reverse, forwarding, DC record registration) · DHCP · Group Policy and advanced auditing · PKI / AD CS · NTFS and share RBAC · network segmentation and firewall policy (pfSense) · multi-DC replication and FSMO management · Microsoft Entra Connect and Password Hash Sync · Hybrid Azure AD Join, PRT, and device registration · Microsoft Intune (enrollment, compliance, configuration, update rings) · backup design with RPO/RTO and restore testing · tenant migration · log-driven root-cause analysis (Entra Connect trace logs, dsregcmd, repadmin, MDM event logs).
+Active Directory design and operations · DNS (forward, reverse, forwarding, DC record registration) · DHCP · Group Policy and advanced auditing · PKI / AD CS · NTFS and share RBAC · network segmentation and firewall policy (pfSense) · multi-DC replication and FSMO management · Microsoft Entra Connect and Password Hash Sync · Hybrid Azure AD Join, PRT, and device registration · Microsoft Intune (enrollment, compliance, configuration, update rings) · backup design with RPO/RTO and restore testing · Conditional Access and Zero Trust (MFA, compliant-device enforcement, break-glass design, report-only rollout) · tenant migration · log-driven root-cause analysis (Entra Connect trace logs, dsregcmd, repadmin, MDM event logs).
