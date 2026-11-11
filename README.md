@@ -3,7 +3,9 @@
 **Author:** Raj Modi
 
 **Platform:** VMware Workstation · Windows Server 2019 · Windows 10 · pfSense · Microsoft Entra ID · Microsoft Intune
-**Last updated:** November 9, 2026
+
+**Last updated:** November 10, 2026
+
 **Status:** ✅ Phase 1 (Infrastructure) complete · 🔄 Phase 2 (Security) in progress — Component 1 done
 
 An enterprise-grade hybrid IT environment built from scratch to mirror how real organizations design, secure, and operate on-premises Active Directory integrated with Microsoft Entra ID and Microsoft Intune. Every component follows enterprise conventions (static infrastructure IPs, segmented networks, RBAC, layered Group Policy, dual domain controllers, pilot rings, tested backups), and every real problem hit along the way is documented with its root cause and fix.
