@@ -4,13 +4,13 @@
 
 **Platform:** VMware Workstation · Windows Server 2019 · Windows 10 · pfSense · Microsoft Entra ID · Microsoft Intune
 
-**Last updated:** November 10, 2026
+**Last updated:** November 12, 2026
 
-**Status:** ✅ Phase 1 (Infrastructure) complete · 🔄 Phase 2 (Security) in progress — Component 1 done
+**Status:** ✅ Phase 1 (Infrastructure) complete · 🔄 Phase 2 (Security) in progress — Components 1 and 2A done
 
 An enterprise-grade hybrid IT environment built from scratch to mirror how real organizations design, secure, and operate on-premises Active Directory integrated with Microsoft Entra ID and Microsoft Intune. Every component follows enterprise conventions (static infrastructure IPs, segmented networks, RBAC, layered Group Policy, dual domain controllers, pilot rings, tested backups), and every real problem hit along the way is documented with its root cause and fix.
 
-This README follows the **order the lab was actually built**. Troubleshooting entries are numbered in the order they happened (`#1`–`#33`), and the same numbers appear in the workflow chart.
+This README follows the **order the lab was actually built**. Troubleshooting entries are numbered in the order they happened (`#1`–`#37`), and the same numbers appear in the workflow chart.
 
 ---
 
@@ -28,10 +28,11 @@ This README follows the **order the lab was actually built**. Troubleshooting en
 10. [Component 7 — Microsoft Intune](#component-7--microsoft-intune-octobernovember-2026)
 11. [Component 8 — Backup and recovery](#component-8--backup-and-recovery-november-2026)
 12. [Phase 2 · Component 1 — Conditional Access + MFA](#phase-2--component-1--conditional-access--mfa-november-2026)
-13. [Troubleshooting log](#-troubleshooting-log-chronological)
-14. [Known deviations](#️-known-deviations-and-limitations)
-15. [Operations runbook](#-operations-runbook)
-16. [Roadmap](#-roadmap--phase-2-security-layer)
+13. [Phase 2 · Component 2A — Defender Antivirus + ASR (Intune)](#phase-2--component-2a--defender-antivirus--attack-surface-reduction-november-2026)
+14. [Troubleshooting log](#-troubleshooting-log-chronological)
+15. [Known deviations](#️-known-deviations-and-limitations)
+16. [Operations runbook](#-operations-runbook)
+17. [Roadmap](#-roadmap--phase-2-security-layer)
 
 ---
 
@@ -52,7 +53,9 @@ This README follows the **order the lab was actually built**. Troubleshooting en
 | 7 | Component 7 — Microsoft Intune (replaces WSUS) | ✅ |
 | 8 | Component 8 — Backup and recovery (restore-tested) | ✅ |
 | P2-1 | Phase 2 · Component 1 — Conditional Access + MFA | ✅ |
-| P2-2 → P2-8 | Phase 2 · Components 2–8 (see [Roadmap](#-roadmap--phase-2-security-layer)) | ⏳ Next |
+| P2-2A | Phase 2 · Component 2A — Defender Antivirus + ASR rules (Intune) | ✅ |
+| P2-2B | Phase 2 · Component 2B — Wazuh endpoint detection | ⏳ Next |
+| P2-3 → P2-8 | Phase 2 · Components 3–8 (see [Roadmap](#-roadmap--phase-2-security-layer)) | ⏳ |
 
 ---
 
@@ -524,6 +527,70 @@ Device identity was initially missing until the Edge profile was signed in with 
 
 ---
 
+# Phase 2 · Component 2A — Defender Antivirus + Attack Surface Reduction (November 2026)
+
+**Why:** Conditional Access decides **who gets in**; endpoint protection stops what happens **after** a user is in, such as a malicious attachment or script. Intune Endpoint security takes Microsoft Defender Antivirus off its defaults and adds **Attack Surface Reduction (ASR)**, which blocks attack *techniques* rather than specific malware.
+
+### Licensing decision
+The plan was **Microsoft Defender for Endpoint (EDR)**. The Defender portal had no **Settings → Endpoints** or **Assets → Devices**, the Developer E5 license didn't list Defender for Endpoint, and the P2 trial requires a payment method (#34). A support request was opened, and the component was split:
+
+| Part | Tooling | Licence needed | Status |
+|---|---|---|---|
+| **2A** | Intune Endpoint security → **Defender Antivirus** + **ASR rules** | Included (Intune) | ✅ Done |
+| **2B** | **Wazuh** (open source) for endpoint detection and, later, SIEM | None | ⏳ Next |
+
+No overlap with Component 7: real-time monitoring, cloud protection, sample submission, SmartScreen and the firewall stay in `SHIELD-Security-Baseline`, so each setting has one owner (no Intune conflicts).
+
+### Policy 1 — `SHIELD-AV-Baseline` (Endpoint security → Antivirus → Microsoft Defender Antivirus)
+
+| Setting | Value |
+|---|---|
+| Cloud Block Level / Cloud Extended Timeout | High / 50 s |
+| PUA Protection | On |
+| Behavior monitoring · downloads/attachments (IOAV) · script · archive · email scanning | Allowed |
+| Enable Network Protection | Enabled (block mode) |
+| Full scan of removable drives | Allowed |
+| Schedule Quick Scan Time | 720 (12:00 PM) |
+| Signature Update Interval | 4 hours |
+| Days To Retain Cleaned Malware | 30 |
+| Disable Local Admin Merge | Enabled (local admin exclusions ignored) |
+
+### Policy 2 — `SHIELD-ASR-Rules` (Endpoint security → Attack surface reduction)
+
+| Mode | Rules |
+|---|---|
+| **Block (12)** | Executable content from email · Office child processes · Office creating executables · Office code injection · Win32 API calls from macros · JS/VBS launching downloads · obfuscated scripts · **credential stealing from LSASS** · WMI event persistence · untrusted/unsigned USB processes · vulnerable signed drivers · advanced ransomware protection |
+| **Audit → Block** | Process creations from **PSExec and WMI** (tested in Audit, then switched to Block) |
+| **Audit** | Executables not meeting prevalence/age/trusted-list criteria |
+
+Both policies are assigned to `SG-SHIELD-Pilot-Devices`.
+
+### Verification on CAP-WKS01
+```powershell
+Get-MpPreference | Select PUAProtection, CloudBlockLevel, CloudExtendedTimeout, EnableNetworkProtection, SignatureUpdateInterval
+$p = Get-MpPreference      # re-run after every sync, or results are stale (#36)
+for ($i=0; $i -lt $p.AttackSurfaceReductionRules_Ids.Count; $i++) {
+  [pscustomobject]@{ RuleId = $p.AttackSurfaceReductionRules_Ids[$i]; Action = $p.AttackSurfaceReductionRules_Actions[$i] }   # 1 = Block, 2 = Audit
+}
+```
+Result: PUA 1 · CloudBlockLevel 2 · Timeout 50 · Network protection 1 · Interval 4; **14 ASR rules** (12 Block, 2 Audit). `DisableLocalAdminMerge` isn't reported by `Get-MpPreference` or the PolicyManager key (#35); verified through Intune per-setting status and a functional test.
+
+### Tests (all passed)
+
+| # | Test | Result | Evidence |
+|---|---|---|---|
+| 1 | **EICAR** test file saved to the Desktop | Quarantined | `Get-MpThreatDetection` · Events **1116/1117** |
+| 2 | EICAR saved in a folder **excluded locally** by an admin (`Add-MpPreference -ExclusionPath`) | Still quarantined → **Disable Local Admin Merge works** | Events 1116/1117 |
+| 3a | WMI process creation (`Invoke-CimMethod Win32_Process Create notepad.exe`), rule in **Audit** | Allowed, logged | Event **1122** · rule `d1e49aac-…` |
+| 3b | Same command after switching the rule to **Block** | **Blocked**, user notified | Event **1121** |
+| 4 | **Network protection**: `Invoke-WebRequest https://smartscreentestratings2.net` | **Blocked** | Event **1126** |
+
+Events: **Applications and Services Logs → Microsoft → Windows → Windows Defender → Operational**. Test exclusions and files were removed afterwards.
+
+**Validation:** both policies **Succeeded**; detection, ASR (audit and block) and network protection proven on CAP-WKS01.
+
+---
+
 # 🚧 Troubleshooting Log (chronological)
 
 | # | Stage | Symptom | Root cause | Fix |
@@ -561,6 +628,10 @@ Device identity was initially missing until the Edge profile was signed in with 
 | 31 | Comp 8 | Forgotten pfSense web admin password | — | Console option **3** (reset) → set new password immediately |
 | 32 | P2 · CA | Report-only CA004 **Failure** on CAP-WKS01; sign-in Device ID blank, Compliant No; Edge "Sign in with your work account" page | Edge wasn't signed in with the work profile (and InPrivate never sends device identity); `AzureAdPrt` first misread from an elevated prompt (see #26) | Sign Edge profile in with the work account, enable *Allow single sign-on for work or school sites*; verify PRT in a non-elevated prompt |
 | 33 | P2 · CA | AAD connector **Delta Import** `stopped-server-down`; Event 109 *Error Code 78: internal error*; Event 6110 *watermark not saved* | Stale AAD connector watermark (not Conditional Access: authentication and exports succeeded) | `Invoke-ADSyncRunProfile` **Full Import** + **Full Synchronization** on the AAD connector, then a delta cycle |
+| 34 | P2 · 2A | Defender portal: no **Settings → Endpoints** / **Assets → Devices**; P2 trial asks for a payment method | Defender for Endpoint not included/provisioned in the Developer E5 tenant | Support request opened; used Intune-managed Defender Antivirus + ASR (2A) and Wazuh for detection (2B) |
+| 35 | P2 · 2A | `DisableLocalAdminMerge` absent from `Get-MpPreference` and the PolicyManager Defender key | Delivered through the Defender *configuration* CSP, not the Policy CSP | Verified via Intune per-setting status (**Succeeded**) and EICAR in a locally excluded folder (still quarantined) |
+| 36 | P2 · 2A | ASR check returned nothing although Intune showed **Succeeded** | `$p` held a `Get-MpPreference` snapshot taken before the policy arrived | Re-run `$p = Get-MpPreference` before reading the rules |
+| 37 | P2 · 2A | Windows Security: "You'll need a new app to open this windowsdefender link" | Windows Security app not registered for Steve's recreated profile (#25) | `Add-AppxPackage -Register -DisableDevelopmentMode "C:\Windows\SystemApps\Microsoft.Windows.SecHealthUI_cw5n1h2txyewy\AppXManifest.xml"` as the user |
 
 ---
 
@@ -582,6 +653,9 @@ Device identity was initially missing until the Edge profile was signed in with 
 | DC backups | STARK-DC01 only | Every DC |
 | pfSense console | Not password-protected | Restricted / password-protected |
 | Seamless SSO | Not configured | Commonly enabled with PHS |
+| Endpoint EDR | Defender Antivirus + ASR via Intune; Wazuh planned for detection | Microsoft Defender for Endpoint (not available on the Developer tenant without a paid trial) |
+| SIEM | Wazuh planned | Microsoft Sentinel (needs an Azure subscription / payment method) |
+| Tamper protection | Not enforced (requires Defender for Endpoint) | On |
 
 ---
 
@@ -623,10 +697,10 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 | # | Component | Goal | Main tooling | Builds on (Phase 1) | New VM? |
 |---|---|---|---|---|---|
 | 1 | Conditional Access + MFA ✅ **Done** | Zero Trust access to cloud apps | Entra ID P2 | Intune compliance, hybrid join | No |
-| 2 | Endpoint Detection & Response | Detect and respond to threats on endpoints | Microsoft Defender for Endpoint | Intune enrollment | No |
+| 2 | Endpoint protection & detection — 2A ✅ **Done**, 2B next | Prevent and detect threats on endpoints | **2A:** Defender AV + ASR (Intune) · **2B:** Wazuh | Intune enrollment | 2B: Wazuh server |
 | 3 | Identity Threat Detection | Detect attacks against Active Directory | Microsoft Defender for Identity | Both DCs, audit GPO | No |
 | 4 | Privileged Access / LAPS | Remove shared local admin passwords; tier admin accounts | Windows LAPS, tiered admin accounts | AD, Intune, GPO | No |
-| 5 | SIEM / Log Management | One place to search, correlate and alert | Microsoft Sentinel | Audit GPO, NTP, Defender, pfSense logs | Possibly (log forwarder) |
+| 5 | SIEM / Log Management | One place to search, correlate and alert | **Wazuh** (Sentinel needs an Azure subscription) | Audit GPO, NTP, Defender, pfSense logs | Shares the Wazuh server |
 | 6 | IDS/IPS | Inspect traffic between VLANs and to the internet | Suricata on pfSense | VLAN segmentation | No (pfSense RAM increase) |
 | 7 | Vulnerability Scanning | Find missing patches and misconfigurations | OpenVAS / Greenbone | Segmented targets, Intune patching | Yes (scanner VM) |
 | 8 | Backup Hardening | Ransomware-resilient backups | Offline / immutable copy | Component 8 | No |
@@ -640,12 +714,13 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 - Roll out in **report-only** mode first, review sign-in logs, then enforce.
 - *Success:* sign-in from CAP-WKS01 (compliant) succeeds without extra prompts; a non-compliant or unknown device is blocked or challenged.
 
-**2 · Microsoft Defender for Endpoint**
-- Onboard CAP-WKS01 through Intune (Endpoint security → EDR policy).
-- Configure antivirus, attack surface reduction rules and tamper protection from Intune.
-- *Success:* device shows **Onboarded** in the Defender portal; the Microsoft **EICAR test file** raises an alert and an incident.
+**2 · Endpoint protection and detection**
+- **2A — ✅ completed** (see the [Component 2A section](#phase-2--component-2a--defender-antivirus--attack-surface-reduction-november-2026)): Intune-managed Defender Antivirus, network protection and 12+2 ASR rules, all tested.
+- **2B — Wazuh:** deploy a Wazuh server VM (~4 GB) on the Server VLAN; install agents on CAP-WKS01 and the DCs; enable file integrity monitoring, Windows event collection and vulnerability detection; map alerts to MITRE ATT&CK.
+- *Success (2B):* agents **Active**; EICAR, a failed-logon burst and an ASR block each raise a Wazuh alert.
+- *If Defender for Endpoint becomes available* (support request, #34): onboard via an Intune EDR policy; the 2A policies carry over unchanged.
 
-**3 · Microsoft Defender for Identity**
+**3 · Microsoft Defender for Identity** *(licence availability on the Developer tenant to be confirmed first, see #34)*
 - Install the sensor on STARK-DC01 and WAKANDA-DC02; create its service account (gMSA).
 - Confirm the required audit events from SHIELD-Audit-Policy are flowing.
 - *Success:* both sensors **healthy**; reconnaissance tests in the lab (e.g. account enumeration) generate alerts.
@@ -660,7 +735,7 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 - Connect data sources: Entra ID sign-ins and audit logs, Defender for Endpoint, Defender for Identity, Windows Security events from the DCs, and pfSense firewall logs (via syslog).
 - Build analytics rules and a workbook: brute force / password spray, account lockouts, admin group changes, after-hours admin logons.
 - *Success:* one test event per source is searchable, and at least one rule creates an incident end to end.
-- *Note:* Sentinel needs an **Azure subscription** (not included in the Microsoft 365 developer tenant); the free trial is enough for a lab. **Wazuh** (self-hosted) is the fallback if an Azure subscription isn't available.
+- *Note:* Sentinel needs an **Azure subscription**, and the Azure free trial requires a payment method. The lab will use the **Wazuh** server from 2B as its SIEM instead (same data sources and use cases); Sentinel remains an option if a subscription becomes available.
 
 **6 · IDS/IPS (Suricata on pfSense)**
 - Install the Suricata package on SHIELD-FW01; enable it on the WAN and User VLAN interfaces.
@@ -697,4 +772,4 @@ Most of Phase 2 runs in the cloud, so it adds little load to the host; the scann
 
 # 🧠 Skills Demonstrated
 
-Active Directory design and operations · DNS (forward, reverse, forwarding, DC record registration) · DHCP · Group Policy and advanced auditing · PKI / AD CS · NTFS and share RBAC · network segmentation and firewall policy (pfSense) · multi-DC replication and FSMO management · Microsoft Entra Connect and Password Hash Sync · Hybrid Azure AD Join, PRT, and device registration · Microsoft Intune (enrollment, compliance, configuration, update rings) · backup design with RPO/RTO and restore testing · Conditional Access and Zero Trust (MFA, compliant-device enforcement, break-glass design, report-only rollout) · tenant migration · log-driven root-cause analysis (Entra Connect trace logs, dsregcmd, repadmin, MDM event logs).
+Active Directory design and operations · DNS (forward, reverse, forwarding, DC record registration) · DHCP · Group Policy and advanced auditing · PKI / AD CS · NTFS and share RBAC · network segmentation and firewall policy (pfSense) · multi-DC replication and FSMO management · Microsoft Entra Connect and Password Hash Sync · Hybrid Azure AD Join, PRT, and device registration · Microsoft Intune (enrollment, compliance, configuration, update rings) · backup design with RPO/RTO and restore testing · endpoint hardening (Defender Antivirus, ASR rules, network protection via Intune) · Conditional Access and Zero Trust (MFA, compliant-device enforcement, break-glass design, report-only rollout) · tenant migration · log-driven root-cause analysis (Entra Connect trace logs, dsregcmd, repadmin, MDM event logs).
