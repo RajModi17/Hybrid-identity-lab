@@ -4,7 +4,7 @@
 
 **Platform:** VMware Workstation · Windows Server 2019 · Windows 10 · pfSense · Microsoft Entra ID · Microsoft Intune
 
-**Last updated:** November 12, 2026
+**Last updated:** November 13, 2026
 
 **Status:** ✅ Phase 1 (Infrastructure) complete · 🔄 Phase 2 (Security) in progress — Components 1 and 2A done
 
@@ -532,7 +532,7 @@ Device identity was initially missing until the Edge profile was signed in with 
 **Why:** Conditional Access decides **who gets in**; endpoint protection stops what happens **after** a user is in, such as a malicious attachment or script. Intune Endpoint security takes Microsoft Defender Antivirus off its defaults and adds **Attack Surface Reduction (ASR)**, which blocks attack *techniques* rather than specific malware.
 
 ### Licensing decision
-The plan was **Microsoft Defender for Endpoint (EDR)**. The Defender portal had no **Settings → Endpoints** or **Assets → Devices**, the Developer E5 license didn't list Defender for Endpoint, and the P2 trial requires a payment method (#34). A support request was opened, and the component was split:
+The plan was **Microsoft Defender for Endpoint (EDR)**. The Defender portal had no **Settings → Endpoints** or **Assets → Devices**, the Developer E5 license didn't list Defender for Endpoint, and the P2 trial requires a payment method (#34). A Microsoft support request confirmed that the **Microsoft 365 E5 Developer (without Windows and Audio Conferencing)** subscription has **no Defender for Endpoint entitlement**, and that a full evaluation isn't possible without a trial or commercial subscription. The component was therefore split:
 
 | Part | Tooling | Licence needed | Status |
 |---|---|---|---|
@@ -628,7 +628,7 @@ Events: **Applications and Services Logs → Microsoft → Windows → Windows D
 | 31 | Comp 8 | Forgotten pfSense web admin password | — | Console option **3** (reset) → set new password immediately |
 | 32 | P2 · CA | Report-only CA004 **Failure** on CAP-WKS01; sign-in Device ID blank, Compliant No; Edge "Sign in with your work account" page | Edge wasn't signed in with the work profile (and InPrivate never sends device identity); `AzureAdPrt` first misread from an elevated prompt (see #26) | Sign Edge profile in with the work account, enable *Allow single sign-on for work or school sites*; verify PRT in a non-elevated prompt |
 | 33 | P2 · CA | AAD connector **Delta Import** `stopped-server-down`; Event 109 *Error Code 78: internal error*; Event 6110 *watermark not saved* | Stale AAD connector watermark (not Conditional Access: authentication and exports succeeded) | `Invoke-ADSyncRunProfile` **Full Import** + **Full Synchronization** on the AAD connector, then a delta cycle |
-| 34 | P2 · 2A | Defender portal: no **Settings → Endpoints** / **Assets → Devices**; P2 trial asks for a payment method | Defender for Endpoint not included/provisioned in the Developer E5 tenant | Support request opened; used Intune-managed Defender Antivirus + ASR (2A) and Wazuh for detection (2B) |
+| 34 | P2 · 2A | Defender portal: no **Settings → Endpoints** / **Assets → Devices**; P2 trial asks for a payment method | Developer SKU *Microsoft 365 E5 Developer (without Windows and Audio Conferencing)* has no Defender for Endpoint entitlement (confirmed by Microsoft support; no WindowsDefenderATP enterprise app in the tenant) | Used Intune-managed Defender Antivirus + ASR (2A) and Wazuh for detection (2B) |
 | 35 | P2 · 2A | `DisableLocalAdminMerge` absent from `Get-MpPreference` and the PolicyManager Defender key | Delivered through the Defender *configuration* CSP, not the Policy CSP | Verified via Intune per-setting status (**Succeeded**) and EICAR in a locally excluded folder (still quarantined) |
 | 36 | P2 · 2A | ASR check returned nothing although Intune showed **Succeeded** | `$p` held a `Get-MpPreference` snapshot taken before the policy arrived | Re-run `$p = Get-MpPreference` before reading the rules |
 | 37 | P2 · 2A | Windows Security: "You'll need a new app to open this windowsdefender link" | Windows Security app not registered for Steve's recreated profile (#25) | `Add-AppxPackage -Register -DisableDevelopmentMode "C:\Windows\SystemApps\Microsoft.Windows.SecHealthUI_cw5n1h2txyewy\AppXManifest.xml"` as the user |
@@ -718,7 +718,7 @@ Phase 2 builds directly on Phase 1. Nothing is rebuilt; every component uses som
 - **2A — ✅ completed** (see the [Component 2A section](#phase-2--component-2a--defender-antivirus--attack-surface-reduction-november-2026)): Intune-managed Defender Antivirus, network protection and 12+2 ASR rules, all tested.
 - **2B — Wazuh:** deploy a Wazuh server VM (~4 GB) on the Server VLAN; install agents on CAP-WKS01 and the DCs; enable file integrity monitoring, Windows event collection and vulnerability detection; map alerts to MITRE ATT&CK.
 - *Success (2B):* agents **Active**; EICAR, a failed-logon burst and an ASR block each raise a Wazuh alert.
-- *If Defender for Endpoint becomes available* (support request, #34): onboard via an Intune EDR policy; the 2A policies carry over unchanged.
+- *If a Defender for Endpoint licence is added later* (e.g. a paid trial): onboard via an Intune EDR policy; the 2A policies carry over unchanged. Microsoft support confirmed the Developer SKU alone can't (#34).
 
 **3 · Microsoft Defender for Identity** *(licence availability on the Developer tenant to be confirmed first, see #34)*
 - Install the sensor on STARK-DC01 and WAKANDA-DC02; create its service account (gMSA).
